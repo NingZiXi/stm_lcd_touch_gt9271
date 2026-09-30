@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.16)
+project(gt9271_host_tests C)
+enable_testing()
+add_subdirectory(.. component)
+add_executable(test_touch test_touch.c)
+target_link_libraries(test_touch PRIVATE stm_lcd_touch_gt9271)
+add_test(NAME touch_coordinates COMMAND test_touch)
