@@ -27,9 +27,14 @@ int stm_lcd_touch_gt9271_read_data(stm_lcd_touch_gt9271_t *touch) {
     uint8_t status, raw[STM_LCD_TOUCH_GT9271_MAX_POINTS * 8u], ack = 0;
     uint8_t n, i; int result = 0;
     if (!touch || !touch->created) return -1;
+    if (touch->config.read_reg(touch->config.io, GT_STATUS, &status, 1)) {
+        touch->count = 0;
+        return -2;
+    }
+    /* Not-ready means no update, not finger-up. Hold the last state between
+     * controller reports; only a ready zero-point frame indicates release. */
+    if (!(status & 0x80u)) return 0;
     touch->count = 0;
-    if (touch->config.read_reg(touch->config.io, GT_STATUS, &status, 1)) return -2;
-    if (!(status & 0x80u)) return 0; /* No new frame: do not report old points. */
     n = status & 0x0fu;
     if (n > STM_LCD_TOUCH_GT9271_MAX_POINTS) result = -3;
     else if (n && touch->config.read_reg(touch->config.io, GT_POINTS, raw, (size_t)n * 8u)) result = -2;

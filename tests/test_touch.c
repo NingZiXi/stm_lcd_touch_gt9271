@@ -32,6 +32,26 @@ int main(void) {
     assert(stm_lcd_touch_gt9271_read_data(&touch) == 0);
     assert(stm_lcd_touch_gt9271_get_data(&touch,&result,1,&count)==0 && count==1);
     assert(result.x==53 && result.y==247 && result.id==2 && acknowledged==1);
+    /* Polling faster than the controller must not introduce false releases. */
+    status=0;
+    for (unsigned i=0; i<100; ++i) {
+        assert(stm_lcd_touch_gt9271_read_data(&touch)==0);
+        assert(stm_lcd_touch_gt9271_get_data(&touch,&result,1,&count)==0 && count==1);
+        assert(result.x==53 && result.y==247 && acknowledged==1);
+    }
+    status=0x81; point[1]=90;
+    assert(stm_lcd_touch_gt9271_read_data(&touch)==0);
+    assert(stm_lcd_touch_gt9271_get_data(&touch,&result,1,&count)==0 && count==1 && result.x==90);
+    status=0x80;
+    assert(stm_lcd_touch_gt9271_read_data(&touch)==0);
+    assert(stm_lcd_touch_gt9271_get_data(&touch,&result,1,&count)==0 && count==0);
+    assert(acknowledged==3);
+    status=0;
+    assert(stm_lcd_touch_gt9271_read_data(&touch)==0);
+    assert(stm_lcd_touch_gt9271_get_data(&touch,&result,1,&count)==0 && count==0);
+    assert(acknowledged==3);
+    status=0x81; point[1]=53;
+    assert(stm_lcd_touch_gt9271_read_data(&touch)==0);
     read_fail=1; assert(stm_lcd_touch_gt9271_read_data(&touch)==-2); read_fail=0;
     assert(stm_lcd_touch_gt9271_get_data(&touch,&result,1,&count)==0 && count==0);
     cfg.mirror_x=1; cfg.mirror_y=1; cfg.swap_xy=0;

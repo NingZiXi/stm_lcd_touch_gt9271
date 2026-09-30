@@ -23,3 +23,5 @@ if (stm_lcd_touch_gt9271_new_i2c(&touch, &cfg) == 0 &&
 可构建的 GPIO、I²C 与 LVGL 实际板级示例位于 STM32H757 主工程 `examples/display_lvgl_demo.c`。
 
 `example.c` 提供 HAL I²C 寄存器回调；先在板级完成 INT/RST 地址选择，再调用 `example_gt9271_start()`。
+
+轮询时，`get_data()` 返回当前状态：未就绪帧保持上一触点，明确的就绪零点帧才释放。不要把“未准备好新帧”解释为松手；此区别对 LVGL 连续拖动和滑动手势十分重要。I²C 或非法帧错误会清空触点，调用者应按释放状态处理并记录错误。

@@ -28,6 +28,8 @@ typedef struct {
 int stm_lcd_touch_gt9271_new_i2c(stm_lcd_touch_gt9271_t *touch, const stm_lcd_touch_gt9271_config_t *config);
 int stm_lcd_touch_gt9271_reset(stm_lcd_touch_gt9271_t *touch);
 int stm_lcd_touch_gt9271_read_id(stm_lcd_touch_gt9271_t *touch, char id[5]);
+/* No new controller frame preserves the last touch state; a ready zero-point
+ * frame releases it. Transport/malformed-frame failures clear cached points. */
 int stm_lcd_touch_gt9271_read_data(stm_lcd_touch_gt9271_t *touch);
 int stm_lcd_touch_gt9271_get_data(const stm_lcd_touch_gt9271_t *touch, stm_lcd_touch_gt9271_point_t *points, size_t capacity, size_t *count);
 #ifdef __cplusplus
