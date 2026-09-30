@@ -1,27 +1,29 @@
-# STM32 HAL 接入示例
+# lcd_touch_gt9271：STM32 HAL 接入示例
 
-配置 GPIO 或 HAL I²C，依据电路在 RST 释放时设置 INT 电平，确定 7 位 I²C 地址。`read_reg` 和 `write_reg` 接收 16 位寄存器地址，返回 0 为成功。每次调用应在返回前同步完成。
+本目录提供可复制到已有 HAL 应用的 `example.c` / `example.h`，不是完整 CubeMX 工程。先初始化板级时钟、GPIO 和总线，再传入实际 HAL 句柄/引脚。代码使用 STM32H7 HAL，其他系列自行替换头文件；示例不会自动编入组件库。
 
-```c
-static int read_reg(void *io, uint16_t reg, uint8_t *dst, size_t n);
-static int write_reg(void *io, uint16_t reg, const uint8_t *src, size_t n);
-stm_lcd_touch_gt9271_t touch = {0};
-stm_lcd_touch_gt9271_config_t cfg = {
-    .read_reg = read_reg, .write_reg = write_reg,
-    .x_max = 800, .y_max = 1280, .mirror_x = 0, .mirror_y = 0,
-};
-char id[5];
-if (stm_lcd_touch_gt9271_new_i2c(&touch, &cfg) == 0 &&
-    stm_lcd_touch_gt9271_read_id(&touch, id) == 0) {
-    stm_lcd_touch_gt9271_point_t points[10];
-    size_t count;
-    if (stm_lcd_touch_gt9271_read_data(&touch) == 0)
-        stm_lcd_touch_gt9271_get_data(&touch, points, 10, &count);
-}
+当前示例对应未发布的新 API；软件验证通过后仍需按实物回归。GT9271 的 v0.1.0 已在 H757 配套模组验证坐标、空白区域滑动及控件拖动；实测方向全部为 0。当前句柄迁移版本尚未实板回归。
+
+## 接入步骤
+
+1. 将组件和 stm_common 加入 CMake；LVGL port 先提供 LVGL 9 target。
+2. 将本目录两个源码文件复制到应用，替换 HAL 头文件和实际板级参数。
+3. 以 NULL 初始化句柄，按 example.h 的 start 接口创建；板级结构体必须持久有效。
+4. 循环绘图/读取触点或调用 LVGL handler，检查每一步 `err != STM_OK`。
+5. 停止所有访问后调用 `lcd_touch_gt9271_delete(&handle)`。
+
+```cmake
+target_sources(your_firmware PRIVATE App/example.c)
+target_include_directories(your_firmware PRIVATE App)
+target_link_libraries(your_firmware PRIVATE stm_lcd_touch_gt9271)
 ```
 
-可构建的 GPIO、I²C 与 LVGL 实际板级示例位于 STM32H757 主工程 `examples/display_lvgl_demo.c`。
+HAL_TIMEOUT 映射为 STM_ERR_TIMEOUT，HAL_ERROR/HAL_BUSY 映射为 STM_ERR_IO，start 失败保留首个错误并回收本次创建的对象，重复 start 不覆盖已有句柄。传输同步完成后才能复用缓冲；阻塞 API 不从中断调用。
 
-`example.c` 提供 HAL I²C 寄存器回调；先在板级完成 INT/RST 地址选择，再调用 `example_gt9271_start()`。
+## I²C 板级填写
 
-轮询时，`get_data()` 返回当前状态：未就绪帧保持上一触点，明确的就绪零点帧才释放。不要把“未准备好新帧”解释为松手；此区别对 LVGL 连续拖动和滑动手势十分重要。I²C 或非法帧错误会清空触点，调用者应按释放状态处理并记录错误。
+填 `lcd_touch_gt9271_example_board_t` 的 i2c、address_7bit、可选 rst_port/rst_pin、逻辑宽高及方向。GT9271 用 0x5d/0x14、16 位寄存器；INT/RST 地址选择在调用 start 之前由板级完成，需按安装方向验证。HAL 接收 7 位地址左移一位。可在既有上电流程已完成复位时将 rst_port 设为空，避免重复复位。
+
+start 接收 `&handle, &board`，poll 接收 `handle, points, capacity, &count`。poll 失败 count 为零；原样返回错误，不自动重试。零点/未就绪语义以芯片 README 为准。
+
+完整 API、错误和资源契约见[中文主页](../../README.md)。
