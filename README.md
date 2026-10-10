@@ -1,76 +1,95 @@
-# stm_lcd_touch_gt9271：GT9271 I²C 触摸驱动
+# stm_lcd_touch_gt9271：GT9271 通用触摸驱动
 
-提供寄存器解码、最多 10 点缓存与 swap_xy/mirror_x/mirror_y 坐标变换，不管理 I²C 外设。
+构造函数返回 `stm_lcd_touch_handle_t`；芯片负责协议解析，框架负责坐标变换与单点快照，port 负责输入采样和松开状态。核心不依赖 MCU/HAL。
 
-## 最小调用
+## 🤖 让 Agent 帮助接入
+
+> 将 `stm_lcd_touch_gt9271` 接入当前工程。先读 AGENTS.md、README、公开头和 HAL 示例，核对 MCU、器件、总线、引脚及尺寸/方向，保留已有改动，不猜接线。使用通用句柄和配套本地框架，按组件协议提供 IO，不增加芯片专用 LVGL 包装。报告实际源码版本、软件验证和未验证项，未经确认不烧录或发布。
+
+## 协议与快照
+
+使用 2 字节寄存器地址，ID=0x8140，状态=0x814E，触点=0x814F，每点 8 字节；保留原最多 10 点的协议解析。校验整帧重复 ID，选择首个在配置原始范围内的有效点。复位保持 0/30 ms → 1/50 ms；RST/INT 地址选择由板级完成，不猜共享复位。7 位地址常量保留 0x14 与 0x5D。
+
+未就绪帧保持上一原始快照，避免持续按住时提前松开；有效零触点帧释放。通信/畸形帧失败清空缓存。ready 帧读取/解析出错仍尝试写 0 到状态寄存器 ACK，首个错误优先；仅 ACK 失败也不发布新快照。`lcd_touch_gt9271_read_id(touch, id)` 保留：成功检查字符串 `9271`，不匹配返回 NOT_SUPPORTED 并保留实际 ID，通信失败清零 5 字节输出；port 借用后不能外部读 ID。
+
+通用 API 暴露零或一个触点；读取完整原始多点帧不等于向应用暴露多点列表。`stm_lcd_touch_read_data` 更新快照；`get_data` 不访问总线、不消费快照，容量为零允许空点数组并输出零。失败清空有效快照，输出数量清零。坐标仅由框架执行一次 swap → 边界检查 → mirror；配置尺寸是变换后的逻辑范围，驱动的原始选点检查不修改坐标。
+
+## 最小接入
+
+先初始化原子寄存器 IO，再创建：
 
 ```c
-lcd_touch_gt9271_handle_t touch = NULL;
-lcd_touch_gt9271_config_t cfg = {
-    .read_reg=board_read_reg, .write_reg=board_write_reg,
-    .io=&board_io, .x_max=BOARD_LCD_WIDTH, .y_max=BOARD_LCD_HEIGHT,
-    .swap_xy=0, .mirror_x=0, .mirror_y=0,
+stm_lcd_touch_handle_t touch = NULL;
+lcd_touch_gt9271_config_t config =
+{
+    .io = &touch_io,
+    .coordinates =
+    {
+        .x_max = display_width,
+        .y_max = display_height,
+        .swap_xy = 0,
+        .mirror_x = 0,
+        .mirror_y = 0,
+    },
+    .reset = board_reset,
+    .delay_ms = board_delay,
+    .control_context = &board,
 };
-stm_err_t err = lcd_touch_gt9271_create(&cfg, &touch);
-lcd_touch_gt9271_point_t point;
-size_t count = 0;
-if (err == STM_OK) err = lcd_touch_gt9271_read_data(touch);
-if (err == STM_OK) err = lcd_touch_gt9271_get_data(touch, &point, 1, &count);
-/* 退出时 lcd_touch_gt9271_delete(&touch)。有 reset 回调时须同时提供 delay_ms。 */
+stm_err_t err = lcd_touch_gt9271_create(&config, &touch);
+if (err == STM_OK)
+{
+    err = stm_lcd_touch_reset(touch);
+}
+// 无 reset 回调时跳过 reset；GT 在 port 创建前还需读取并核对 ID。
 ```
 
-## 错误与资源契约
+FT5206 必需 `read_reg`；GT9271 必需 `read_reg/write_reg`。适配器必须保持 HAL Mem_Read/Write 的原子寄存器事务，不能照搬 AXS 的独立写—STOP—读响应协议。7 位设备地址在 HAL 边界只左移一次。
 
-所有操作和传输/复位回调返回 `stm_err_t`，成功为 `STM_OK`，失败检查 `err != STM_OK`，不能使用 `err < 0`。HAL 适配将 `HAL_TIMEOUT` 映射为 `STM_ERR_TIMEOUT`，`HAL_ERROR/HAL_BUSY` 映射为 `STM_ERR_IO`；组件原样传递回调错误，延时回调仍返回 void。
+独立测试可 read 后 get；交给 port 的 `.touch` 后由 port 独占读取，不能另加应用轮询/触摸回调包装。IO/TIMEOUT 离线探测、过期释放由 port 统一完成，VERIFY 释放输入但不直接判离线。
 
-| 情况 | 错误 |
+## 从 v0.2.0 迁移
+
+| v0.2.0 | 当前工作区 |
 | --- | --- |
-| 空参数、非法调用参数 | `STM_ERR_INVALID_ARG` |
-| 缺少必需回调、尺寸或方向配置错误 | `STM_ERR_INVALID_CONFIG` |
-| 输出句柄非空、面板未初始化 | `STM_ERR_INVALID_STATE` |
-| 控制对象/LVGL 对象分配失败 | `STM_ERR_NO_MEM` |
-| 绘图越界或像素长度计算溢出 | `STM_ERR_OUT_OF_RANGE` |
-| GT9271 ID 不匹配 | `STM_ERR_NOT_SUPPORTED` |
-| 触摸帧点数等数据校验失败 | `STM_ERR_VERIFY` |
-
-`create(config, &handle)` 要求 handle 初始为 NULL；复制配置，用 calloc/free 管理小型控制对象，芯片 create 不访问硬件。创建失败保持输出为空；非空输出被拒绝且原值不变。`delete(&handle)` 仅回收拥有的对象，成功清空 handle，空句柄也成功；NULL 句柄地址是参数错误。删除前停止并发访问，其他别名不会被自动清空。
-
-板级拥有 HAL、总线、GPIO、背光、外部缓冲和回调上下文；组件不释放或重新配置这些资源。实例使用期间上下文必须有效，可用 NULL io 表示无上下文。应用串行调用，组件不默认线程安全，不在中断中调用阻塞操作，不增加日志/RTT/RTOS 依赖。同步传输返回前必须用完输入缓冲；共享总线在整笔事务外加锁，DMA/DCache 一致性由板级管理。
-
-## 地址、坐标与失败状态
-
-板级保存 7 位 I²C 地址，HAL 参数用 `address_7bit << 1`。GT9271 常用 0x5d/0x14，INT/RST 地址选择由板级执行；FT5206 常用 0x38，按实物核实。寄存器地址宽度分别为 GT9271 16 位、FT5206 8 位。
-
-x_max/y_max 为变换后的逻辑尺寸，先 swap_xy、检查范围、再镜像；方向标志仅允许 0/1。越界点被过滤。get_data 返回实际复制的 min(点数,capacity)，capacity=0 允许空点数组；失败清零有效 count。复位清空缓存，通信/畸形帧失败清空本次状态，不自动重试；下一次 read_data 可恢复。
-
-GT9271 无新帧时保持上一触摸状态，只有有效零点帧释放。就绪帧解析失败仍尝试 ACK，同时保留首个错误；ACK 失败不提交触点。read_id 读 4 字节并补 NUL，产品不匹配保留实际 ID，通信失败输出清空。
-
-## CMake 与依赖
-
-依赖 `stm_common` 的 `stm_err.h`，不复制公共错误码。优先复用已有 `stm_common` target，其次找同级源码；缺失时自动下载固定 v1.0.0 提交 `ce3d186dde2d374a8e9c7b9068a7b88f97d57dc1`。可设置 `STM_COMMON_FETCH=OFF` 禁止下载，`STM_COMMON_GIT_REPOSITORY=https://gitee.com/nzxhg/stm_common.git` 指定镜像，或 `FETCHCONTENT_SOURCE_DIR_STM_COMMON` 指定离线源码。已有 target/同级源码无需网络。
+| `lcd_touch_gt9271_handle_t` | `stm_lcd_touch_handle_t` |
+| I2C 读写回调与 `void *io` | 通用 IO 的原子 `read_reg/write_reg`，独立控制上下文 |
+| 顶层 x_max/y_max/swap/mirror | `.coordinates`，框架只变换一次 |
+| `lcd_touch_gt9271_reset/read_data/get_data/delete` | `stm_lcd_touch_reset/read_data/get_data/delete` |
+| 多点输出数组 | 通用单点快照，保留完整原始帧解析与校验 |
 
 ```cmake
+add_subdirectory(Lib/stm_lcd)
 add_subdirectory(Lib/stm_lcd_touch_gt9271)
 target_link_libraries(your_firmware PRIVATE stm_lcd_touch_gt9271)
 ```
 
-手动集成时添加组件 include/源码及 stm_common 头文件目录。LVGL port 还要求应用提前提供 LVGL 9 的 `lvgl` target 和配置。
+## 生命周期与错误
 
-## 从 v0.1.0 迁移
+`create` 要求输出句柄初始为 `NULL`，仅分配小型控制对象、复制配置并借用 IO，不访问硬件。创建失败不发布实例；非空输出返回 `STM_ERR_INVALID_STATE` 并保留原值。回调和上下文必须持续有效，IO、HAL、GPIO 与像素缓冲归应用所有。
 
-| 旧接口 | 当前接口 |
+删除顺序为 port → 设备 → IO → HAL/外部缓冲。删除空句柄成功，空句柄地址返回 `STM_ERR_INVALID_ARG`；被借用、正在传输或回调期间拒绝删除，实例保留供后续服务/重试。应用串行调用，禁止 ISR/递归访问；删除后自行清除其他别名。
+
+所有操作/复位/传输回调返回 `stm_err_t`，以 `err != STM_OK` 判断错误，底层错误原样传递。延时回调保持 `void`。HAL 示例映射 `HAL_TIMEOUT` 为 `STM_ERR_TIMEOUT`，`HAL_ERROR/HAL_BUSY` 为 `STM_ERR_IO`。
+
+| 情况 | 错误 |
 | --- | --- |
-| `stm_lcd_touch_gt9271_t` 公开结构体 | `lcd_touch_gt9271_handle_t`，初始 NULL |
-| `stm_lcd_touch_gt9271_config_t` | `lcd_touch_gt9271_config_t` |
-| `new_i2c(实例地址, config)` | `lcd_touch_gt9271_create(config, &handle)` |
-| 直接访问结构体 / 无销毁接口 | `lcd_touch_gt9271_delete(&handle)` |
-| int 与负数错误码 | `stm_err_t`，`err != STM_OK`，回调同步迁移 |
+| 空指针、空或倒置矩形、非法调用参数 | `STM_ERR_INVALID_ARG` |
+| 缺少必需 IO 能力、尺寸/布尔配置非法 | `STM_ERR_INVALID_CONFIG` |
+| 重复创建、未初始化、对象被借用或操作在途 | `STM_ERR_INVALID_STATE` |
+| 控制对象分配失败 | `STM_ERR_NO_MEM` |
+| 绘图越界或字节数溢出 | `STM_ERR_OUT_OF_RANGE` |
+| 未实现的可选能力 | `STM_ERR_NOT_SUPPORTED` |
+| 协议点数/触点 ID 校验失败 | `STM_ERR_VERIFY` |
 
-其他操作使用 lcd_touch_<型号> 前缀，point_t 与 MAX_POINTS 常量也使用此组件前缀。
+## CMake 与离线依赖
 
-2026-10-07，`v0.2.0` 接口在 STM32H757XIH6 CB V1.0、WKS101HD031-WCT 10.1 寸 800×1280 模组（ILI9881C/GT9271）、LVGL 9.3.0 上完成回归：诊断显示持续刷新、按钮与触摸输入、五次连续软件复位及 Release 启动通过；官方 Widgets 的滑动、点击由用户现场确认正常，读取状态中刷新、输入和切帧错误均为 0。板级使用 RGB565 DIRECT 双缓冲，触摸 mirror_x=0、mirror_y=0；结论限于该组合，不代表其他模组已验证。 本轮状态只保存最后触点，未单独留存各角坐标测量记录。
+公开链接 `stm_common` 与 `stm_lcd`，核心不依赖 HAL、LVGL 或日志。`stm_common` 解析顺序为已有 target → 同级源码 → 固定 v1.0.0 提交 `ce3d186dde2d374a8e9c7b9068a7b88f97d57dc1`；自动获取支持 `FETCHCONTENT_SOURCE_DIR_STM_COMMON` 离线覆盖、`STM_COMMON_FETCH=OFF` 和 `STM_COMMON_GIT_REPOSITORY` 镜像。
 
-## 软件验证与发布状态
+`stm_lcd` 解析顺序为已有 target → `STM_LCD_SOURCE_DIR` → `FETCHCONTENT_SOURCE_DIR_STM_LCD` → 同级源码 → 固定 v1.0.0 提交 `c359e54a657be38aec90c797ea19ee3d492d9284`。`STM_LCD_FETCH=OFF` 禁止下载；`STM_LCD_GIT_REPOSITORY` 可指向 GitHub/Gitee 镜像，默认固定 SHA 不改变。无效显式目录直接报错，不退回网络；多个组件使用同一 `stm_lcd` target/FetchContent 名称。
+
+当前迁移组合的 ILI9881C、FT5206、GT9271 与新版 port 使用尚未发布的帧缓冲/原子寄存器扩展，**必须一起提供匹配的 `stm_lcd` 源码（聚合仓库 gitlink 固定）**；已发布 v1.0.0 不具备这些能力，配置时明确报错。ST7789/ST7796 核心仍可使用该正式框架的同步接口。依赖不自动追踪 main，也不伪造未来版本 SHA。
+
+## 软件验证与版本边界
 
 ```sh
 cmake -S tests -B build/tests -G Ninja -DCMAKE_BUILD_TYPE=Debug
@@ -78,6 +97,14 @@ cmake --build build/tests
 ctest --test-dir build/tests --output-on-failure
 ```
 
-主机测试覆盖参数/配置、分配失败、资源回收、多实例和错误传递，并编译 C11/C++17 公共头文件。测试分配器仅用于测试构建，不加入产品固件。中文 HAL 示例见 [examples/stm32_hal/README.md](examples/stm32_hal/README.md)。许可证见 [LICENSE](LICENSE)。
+测试保留原协议用例，补充通用句柄、空参数/非法配置、重复创建、分配失败、借用回滚、删除重建、多实例与错误传递；公共头按 C11/C++17 消费。中文 HAL 示例见 [examples/stm32_hal](examples/stm32_hal/README.md)。同级新版 port 的集成测试将五种器件交给同一份 port 源码，并检查 PARTIAL/DIRECT 及失败路径。
 
-`v0.2.0` 采用不透明句柄、`create/delete` 和统一 `stm_err_t`，包含破坏性接口迁移，不保留旧接口包装。`v0.1.0` 继续保留；升级前按上表迁移类型、回调和生命周期。此版本的主机测试、C11/C++17 头文件、中文 HAL 示例及 H757 Debug/Release 集成构建已通过。
+当前提交是尚未发布新版本的通用接口迁移，原 `v0.2.0` tag 保留原 API，未发布新 tag 或 Release。
+
+2026-10-11，匹配的本地 stm_lcd、ILI9881C、GT9271、stm_lvgl_port 和 LVGL 9.3.0 在 H757 配套 10.1 寸模组上通过 DIRECT 诊断 Debug 回归：800×1280 RGB565、DSI 两通道、板级 DMA2D，ST-Link 双核烧录独立读回、刷新持续推进、触摸/按钮事件和五次软件复位均正常，用户确认画面与触摸正常。触摸板级使用 PB10/PB11 软件 I2C，7 位地址 0x5d，mirror_x/y=0。
+
+本次未重新验证 PARTIAL、Release、Widgets、掉电复位或长期稳定性，未独立量化各角坐标；HAL 硬件 I2C 示例仍为编译验证。其他模组/平台不在本次实板范围内，旧 tag 的验收结果不移用。固件、源码哈希和硬件日志留在消费工程本地构建目录。
+
+## 许可证
+
+[MIT](LICENSE)，保留维护者和既有来源说明。
