@@ -56,7 +56,7 @@ if(NOT TARGET stm_lcd)
         endif()
         FetchContent_Declare(stm_lcd
             GIT_REPOSITORY "${STM_LCD_GIT_REPOSITORY}"
-            GIT_TAG c359e54a657be38aec90c797ea19ee3d492d9284 # stm_lcd v1.0.0
+            GIT_TAG 7e7c3f26d43881f9b14ae4268a3be20404a93835 # stm_lcd v1.1.0
         )
         FetchContent_MakeAvailable(stm_lcd)
     endif()
@@ -66,7 +66,7 @@ if(NOT TARGET stm_lcd)
 endif()
 target_link_libraries(stm_lcd_touch_gt9271 PUBLIC stm_lcd)
 
-# 未发布扩展只从本地源码复用；不能伪造已发布依赖版本。
+# 检查 stm_lcd v1.1.0 提供的帧缓冲与原子寄存器能力。
 get_target_property(_stm_lcd_includes stm_lcd INTERFACE_INCLUDE_DIRECTORIES)
 set(_stm_lcd_extended FALSE)
 foreach(_include IN LISTS _stm_lcd_includes)
@@ -81,5 +81,5 @@ foreach(_include IN LISTS _stm_lcd_includes)
     endif()
 endforeach()
 if(NOT _stm_lcd_extended)
-    message(FATAL_ERROR "This working migration requires local stm_lcd with STM_LCD_FRAMEBUFFER_API=1. Published v1.0.0 is insufficient; supply the matching stm_lcd target or sibling source before configuring.")
+    message(FATAL_ERROR "This component requires stm_lcd v1.1.0 capabilities (STM_LCD_FRAMEBUFFER_API=1). Provide a matching stm_lcd target or source directory; v1.0.0 lacks these capabilities.")
 endif()

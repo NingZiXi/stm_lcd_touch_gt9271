@@ -1,5 +1,7 @@
 # stm_lcd_touch_gt9271：GT9271 通用触摸驱动
 
+[![版本 v1.0.0](https://img.shields.io/badge/version-v1.0.0-blue)](https://github.com/NingZiXi/stm_lcd_touch_gt9271/releases/tag/v1.0.0)
+
 构造函数返回 `stm_lcd_touch_handle_t`；芯片负责协议解析，框架负责坐标变换与单点快照，port 负责输入采样和松开状态。核心不依赖 MCU/HAL。
 
 ## 🤖 让 Agent 帮助接入
@@ -85,9 +87,9 @@ target_link_libraries(your_firmware PRIVATE stm_lcd_touch_gt9271)
 
 公开链接 `stm_common` 与 `stm_lcd`，核心不依赖 HAL、LVGL 或日志。`stm_common` 解析顺序为已有 target → 同级源码 → 固定 v1.0.0 提交 `ce3d186dde2d374a8e9c7b9068a7b88f97d57dc1`；自动获取支持 `FETCHCONTENT_SOURCE_DIR_STM_COMMON` 离线覆盖、`STM_COMMON_FETCH=OFF` 和 `STM_COMMON_GIT_REPOSITORY` 镜像。
 
-`stm_lcd` 解析顺序为已有 target → `STM_LCD_SOURCE_DIR` → `FETCHCONTENT_SOURCE_DIR_STM_LCD` → 同级源码 → 固定 v1.0.0 提交 `c359e54a657be38aec90c797ea19ee3d492d9284`。`STM_LCD_FETCH=OFF` 禁止下载；`STM_LCD_GIT_REPOSITORY` 可指向 GitHub/Gitee 镜像，默认固定 SHA 不改变。无效显式目录直接报错，不退回网络；多个组件使用同一 `stm_lcd` target/FetchContent 名称。
+`stm_lcd` 解析顺序为已有 target → `STM_LCD_SOURCE_DIR` → `FETCHCONTENT_SOURCE_DIR_STM_LCD` → 同级源码 → 固定 v1.1.0 提交 `7e7c3f26d43881f9b14ae4268a3be20404a93835`。`STM_LCD_FETCH=OFF` 禁止下载；`STM_LCD_GIT_REPOSITORY` 可指向 GitHub/Gitee 镜像，默认固定 SHA 不改变。无效显式目录直接报错，不退回网络；多个组件使用同一 `stm_lcd` target/FetchContent 名称。
 
-当前迁移组合的 ILI9881C、FT5206、GT9271 与新版 port 使用尚未发布的帧缓冲/原子寄存器扩展，**必须一起提供匹配的 `stm_lcd` 源码（聚合仓库 gitlink 固定）**；已发布 v1.0.0 不具备这些能力，配置时明确报错。ST7789/ST7796 核心仍可使用该正式框架的同步接口。依赖不自动追踪 main，也不伪造未来版本 SHA。
+当前正式组合使用 `stm_lcd v1.1.0` 的通用接口与帧缓冲/原子寄存器能力；五款芯片组件的自动下载均固定上述提交。复用已有 target 或本地源码时由应用保证版本匹配，ILI9881C、FT5206、GT9271 会检查 `STM_LCD_FRAMEBUFFER_API=1`；框架旧 `v1.0.0` 不含这些扩展。依赖不自动追踪 main。
 
 ## 软件验证与版本边界
 
@@ -99,7 +101,7 @@ ctest --test-dir build/tests --output-on-failure
 
 测试保留原协议用例，补充通用句柄、空参数/非法配置、重复创建、分配失败、借用回滚、删除重建、多实例与错误传递；公共头按 C11/C++17 消费。中文 HAL 示例见 [examples/stm32_hal](examples/stm32_hal/README.md)。同级新版 port 的集成测试将五种器件交给同一份 port 源码，并检查 PARTIAL/DIRECT 及失败路径。
 
-当前提交是尚未发布新版本的通用接口迁移，原 `v0.2.0` tag 保留原 API，未发布新 tag 或 Release。
+`v1.0.0` 正式发布本次通用接口迁移，与旧 `v0.2.0` API 不兼容，不提供旧接口包装；原 tag 保留。下述 H757 验证对应本次发布所含的驱动源码，其他器件或平台未由此得到验证。
 
 2026-10-11，匹配的本地 stm_lcd、ILI9881C、GT9271、stm_lvgl_port 和 LVGL 9.3.0 在 H757 配套 10.1 寸模组上通过 DIRECT 诊断 Debug 回归：800×1280 RGB565、DSI 两通道、板级 DMA2D，ST-Link 双核烧录独立读回、刷新持续推进、触摸/按钮事件和五次软件复位均正常，用户确认画面与触摸正常。触摸板级使用 PB10/PB11 软件 I2C，7 位地址 0x5d，mirror_x/y=0。
 
